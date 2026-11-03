@@ -1,4 +1,5 @@
 const express = require("express");
+const pool = require("./db/pg-pool");
 
 const timeRouter = require("./routes/timeRoutes");
 const userRouter = require("./routes/userRoutes");
@@ -14,6 +15,16 @@ global.user_id = null;
 global.tasks = [];
 
 app.use(express.json());
+
+app.get("/health", async (req, res) => {
+    try {
+        await pool.query("SELECT 1");
+        res.status(200).json({ status: "ok" });
+    } catch (error) {
+        console.error("Database health check failed:", error);
+        res.status(503).json({ status: "error" });
+    }
+});
 
 app.use("/api", timeRouter);
 app.use("/api/users", userRouter);
@@ -64,6 +75,8 @@ async function shutdown(code = 0) {
             });
         });
         console.log("HTTP server closed.");
+        await pool.end();
+        console.log("PostgreSQL pool closed.");
     } catch (err) {
         console.error("Error during shutdown:", err);
         code = 1;
