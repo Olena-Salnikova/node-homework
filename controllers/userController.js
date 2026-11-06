@@ -1,4 +1,5 @@
 const { userSchema } = require("../validation/userSchema");
+const pool = require("../db/pg-pool");
 
 const crypto = require("crypto");
 const util = require("util");
@@ -39,42 +40,66 @@ async function register(req, res) {
     const { name, email, password } = value;
 
     const hashedPassword = await hashPassword(password);
+    try {
 
-    const user = {
-        name,
-        email,
-        hashedPassword,
-    };
+        const result = await pool.query(
+            `INSERT INTO users (name, email, hashed_password)
+            VALUES ($1, $2, $3)
+            RETURNING id, name, email`,
+            [name, email, hashedPassword]
+        );
 
-    global.users.push(user);
-    global.user_id = user;
+        global.user_id = result.rows[0].id;
 
-    return res.status(201).json({ name, email });
+        return res.status(201).json({ name, email });
+
+    } catch (error) {
+        if (error.code === "23505") {
+            return res.status(400).json({
+                message: "Email already registered",
+            });
+        }
+
+        console.error("Registration error:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+        });
+    }
 }
 
 // Handle user login.
 async function logon(req, res) {
     const { email, password } = req.body || {};
+    try {
 
-    const user = global.users.find(
-        (user) => user.email === email
-    );
+        const result = await pool.query(
+            "SELECT id, name, email, hashed_password FROM users WHERE email = $1",
+            [email]
+        );
 
-    const goodCredentials =
-        user && await comparePassword(password, user.hashedPassword);
+        const user = result.rows[0];
 
-    if (!goodCredentials) {
-        return res.status(401).json({
-            message: "Invalid email or password",
+        const goodCredentials = user && await comparePassword(password, user.hashed_password);
+
+        if (!goodCredentials) {
+            return res.status(401).json({
+                message: "Invalid email or password",
+            });
+        }
+
+        global.user_id = user.id;
+
+        return res.status(200).json({
+            name: user.name,
+            email: user.email,
+        });
+
+    } catch (error) {
+        console.error("Login error:", error);
+        return res.status(500).json({
+            message: "Internal server error",
         });
     }
-
-    global.user_id = user;
-
-    return res.status(200).json({
-        name: user.name,
-        email: user.email,
-    });
 }
 
 // Handle user logout.

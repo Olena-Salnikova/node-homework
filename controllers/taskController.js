@@ -1,13 +1,5 @@
 const { taskSchema, patchTaskSchema } = require("../validation/taskSchema");
-
-const taskCounter = (() => {
-    let lastTaskNumber = 0;
-
-    return () => {
-        lastTaskNumber += 1;
-        return lastTaskNumber;
-    };
-})();
+const pool = require("../db/pg-pool");
 
 // Task controller functions for handling CRUD operations on tasks.
 async function create(req, res) {
@@ -23,37 +15,51 @@ async function create(req, res) {
         });
     }
 
-    const newTask = {
-        id: taskCounter(),
-        userId: global.user_id.email,
-        ...value,
-    };
+    try {
+        const result = await pool.query(
+            `INSERT INTO tasks (title, user_id)
+            VALUES ($1, $2)
+            RETURNING id, title, is_completed`,
+            [value.title, global.user_id]
+        );
 
-    global.tasks.push(newTask);
+        return res.status(201).json(result.rows[0]);
 
-    const { userId, ...sanitizedTask } = newTask;
+    } catch (error) {
+        console.error("Task creation error:", error);
 
-    return res.status(201).json(sanitizedTask);
+        return res.status(500).json({
+            message: "Internal server error",
+        });
+    }
 }
 
 // Retrieve all tasks for the authenticated user.
 async function index(req, res) {
-    const userTasks = global.tasks.filter(
-        (task) => task.userId === global.user_id.email
-    );
+    try {
+        const result = await pool.query(
+            `SELECT id, title, is_completed AS "isCompleted"
+             FROM tasks
+             WHERE user_id = $1
+             ORDER BY id`,
+            [global.user_id]
+        );
 
-    if (userTasks.length === 0) {
-        return res.status(404).json({
-            message: "No tasks found",
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "No tasks found",
+            });
+        }
+
+        return res.status(200).json(result.rows);
+
+    } catch (error) {
+        console.error("Task retrieval error:", error);
+
+        return res.status(500).json({
+            message: "Internal server error",
         });
     }
-
-    const sanitizedTasks = userTasks.map((task) => {
-        const { userId, ...sanitizedTask } = task;
-        return sanitizedTask;
-    });
-
-    return res.status(200).json(sanitizedTasks);
 }
 
 // Retrieve a specific task by ID for the authenticated user.
@@ -66,21 +72,29 @@ async function show(req, res) {
         });
     }
 
-    const task = global.tasks.find(
-        (task) =>
-            task.id === taskId &&
-            task.userId === global.user_id.email
-    );
+    try {
+        const result = await pool.query(
+            `SELECT id, title, is_completed AS "isCompleted"
+             FROM tasks
+             WHERE id = $1 AND user_id = $2`,
+            [taskId, global.user_id]
+        );
 
-    if (!task) {
-        return res.status(404).json({
-            message: "Task not found",
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "Task not found",
+            });
+        }
+
+        return res.status(200).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Task retrieval error:", error);
+
+        return res.status(500).json({
+            message: "Internal server error",
         });
     }
-
-    const { userId, ...sanitizedTask } = task;
-
-    return res.status(200).json(sanitizedTask);
 }
 
 // Update a specific task by ID for the authenticated user.
@@ -105,23 +119,36 @@ async function update(req, res) {
         });
     }
 
-    const task = global.tasks.find(
-        (task) =>
-            task.id === taskId &&
-            task.userId === global.user_id.email
-    );
+    try {
+        const result = await pool.query(
+            `UPDATE tasks
+             SET title = COALESCE($1, title),
+                 is_completed = COALESCE($2, is_completed)
+             WHERE id = $3 AND user_id = $4
+             RETURNING id, title, is_completed AS "isCompleted"`,
+            [
+                value.title ?? null,
+                value.isCompleted ?? null,
+                taskId,
+                global.user_id
+            ]
+        );
 
-    if (!task) {
-        return res.status(404).json({
-            message: "Task not found",
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "Task not found",
+            });
+        }
+
+        return res.status(200).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Task update error:", error);
+
+        return res.status(500).json({
+            message: "Internal server error",
         });
     }
-
-    Object.assign(task, value);
-
-    const { userId, ...sanitizedTask } = task;
-
-    return res.status(200).json(sanitizedTask);
 }
 
 // Delete a specific task by ID for the authenticated user.
@@ -134,25 +161,30 @@ async function deleteTask(req, res) {
         });
     }
 
-    const taskIndex = global.tasks.findIndex(
-        (task) =>
-            task.id === taskId &&
-            task.userId === global.user_id.email
-    );
+    try {
+        const result = await pool.query(
+            `DELETE FROM tasks
+             WHERE id = $1 AND user_id = $2
+             RETURNING id, title, is_completed AS "isCompleted"`,
+            [taskId, global.user_id]
+        );
 
-    if (taskIndex === -1) {
-        return res.status(404).json({
-            message: "Task not found",
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "Task not found",
+            });
+        }
+
+        return res.status(200).json(result.rows[0]);
+
+    } catch (error) {
+        console.error("Task deletion error:", error);
+
+        return res.status(500).json({
+            message: "Internal server error",
         });
     }
-
-    const task = global.tasks[taskIndex];
-
-    const { userId, ...sanitizedTask } = task;
-
-    global.tasks.splice(taskIndex, 1);
-
-    return res.status(200).json(sanitizedTask);
 }
+
 
 module.exports = { create, index, show, update, deleteTask };
