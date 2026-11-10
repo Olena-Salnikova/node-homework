@@ -1,7 +1,9 @@
 function errorHandler(err, req, res, next) {
     void next;
 
-    if (err.code === "ECONNREFUSED") {
+    if (err.name === "PrismaClientInitializationError") {
+        console.error("Couldn't connect to the database. Is it running?");
+    } else if (err.code === "ECONNREFUSED") {
         console.error(
             "Database connection refused. Make sure PostgreSQL is running."
         );

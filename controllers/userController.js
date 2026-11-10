@@ -1,5 +1,5 @@
 const { userSchema } = require("../validation/userSchema");
-const pool = require("../db/pg-pool");
+const prisma = require("../db/prisma");
 
 const crypto = require("crypto");
 const util = require("util");
@@ -24,7 +24,7 @@ async function comparePassword(inputPassword, storedHash) {
 }
 
 // Handle user registration, login, and logout.
-async function register(req, res) {
+async function register(req, res, next) {
     if (!req.body) req.body = {};
 
     const { error, value } = userSchema.validate(req.body, {
@@ -38,48 +38,56 @@ async function register(req, res) {
     }
 
     const { name, email, password } = value;
-
     const hashedPassword = await hashPassword(password);
+
     try {
+        const user = await prisma.user.create({
+            data: {
+                name,
+                email: email.toLowerCase(),
+                hashedPassword,
+            },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+            },
+        });
 
-        const result = await pool.query(
-            `INSERT INTO users (name, email, hashed_password)
-            VALUES ($1, $2, $3)
-            RETURNING id, name, email`,
-            [name, email, hashedPassword]
-        );
+        global.user_id = user.id;
 
-        global.user_id = result.rows[0].id;
-
-        return res.status(201).json({ name, email });
+        return res.status(201).json({
+            name: user.name,
+            email: user.email,
+        });
 
     } catch (error) {
-        if (error.code === "23505") {
+        if (
+            error.name === "PrismaClientKnownRequestError" &&
+            error.code === "P2002"
+        ) {
             return res.status(400).json({
                 message: "Email already registered",
             });
         }
 
-        console.error("Registration error:", error);
-        return res.status(500).json({
-            message: "Internal server error",
-        });
+        next(error);
     }
 }
 
 // Handle user login.
 async function logon(req, res) {
     const { email, password } = req.body || {};
+
     try {
+        const normalizedEmail = email?.toLowerCase();
 
-        const result = await pool.query(
-            "SELECT id, name, email, hashed_password FROM users WHERE email = $1",
-            [email]
-        );
+        const user = await prisma.user.findUnique({
+            where: { email: normalizedEmail }
+        });
 
-        const user = result.rows[0];
-
-        const goodCredentials = user && await comparePassword(password, user.hashed_password);
+        const goodCredentials = user &&
+            await comparePassword(password, user.hashedPassword);
 
         if (!goodCredentials) {
             return res.status(401).json({
