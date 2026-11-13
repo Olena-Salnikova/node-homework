@@ -1,5 +1,5 @@
 const { taskSchema, patchTaskSchema } = require("../validation/taskSchema");
-const pool = require("../db/pg-pool");
+const prisma = require("../db/prisma");
 
 // Task controller functions for handling CRUD operations on tasks.
 async function create(req, res) {
@@ -16,14 +16,19 @@ async function create(req, res) {
     }
 
     try {
-        const result = await pool.query(
-            `INSERT INTO tasks (title, user_id)
-            VALUES ($1, $2)
-            RETURNING id, title, is_completed`,
-            [value.title, global.user_id]
-        );
+        const task = await prisma.task.create({
+            data: {
+                title: value.title,
+                userId: global.user_id,
+            },
+            select: {
+                id: true,
+                title: true,
+                isCompleted: true,
+            },
+        });
 
-        return res.status(201).json(result.rows[0]);
+        return res.status(201).json(task);
 
     } catch (error) {
         console.error("Task creation error:", error);
@@ -37,21 +42,27 @@ async function create(req, res) {
 // Retrieve all tasks for the authenticated user.
 async function index(req, res) {
     try {
-        const result = await pool.query(
-            `SELECT id, title, is_completed AS "isCompleted"
-             FROM tasks
-             WHERE user_id = $1
-             ORDER BY id`,
-            [global.user_id]
-        );
+        const tasks = await prisma.task.findMany({
+            where: {
+                userId: global.user_id,
+            },
+            select: {
+                title: true,
+                isCompleted: true,
+                id: true,
+            },
+            orderBy: {
+                id: "asc",
+            },
+        });
 
-        if (result.rows.length === 0) {
+        if (tasks.length === 0) {
             return res.status(404).json({
                 message: "No tasks found",
             });
         }
 
-        return res.status(200).json(result.rows);
+        return res.status(200).json(tasks);
 
     } catch (error) {
         console.error("Task retrieval error:", error);
@@ -63,7 +74,7 @@ async function index(req, res) {
 }
 
 // Retrieve a specific task by ID for the authenticated user.
-async function show(req, res) {
+async function show(req, res, next) {
     const taskId = parseInt(req.params?.id);
 
     if (isNaN(taskId)) {
@@ -73,32 +84,33 @@ async function show(req, res) {
     }
 
     try {
-        const result = await pool.query(
-            `SELECT id, title, is_completed AS "isCompleted"
-             FROM tasks
-             WHERE id = $1 AND user_id = $2`,
-            [taskId, global.user_id]
-        );
+        const task = await prisma.task.findUnique({
+            where: {
+                id: taskId,
+                userId: global.user_id,
+            },
+            select: {
+                id: true,
+                title: true,
+                isCompleted: true,
+            },
+        });
 
-        if (result.rows.length === 0) {
+        if (!task) {
             return res.status(404).json({
                 message: "Task not found",
             });
         }
 
-        return res.status(200).json(result.rows[0]);
+        return res.status(200).json(task);
 
     } catch (error) {
-        console.error("Task retrieval error:", error);
-
-        return res.status(500).json({
-            message: "Internal server error",
-        });
+        next(error);
     }
 }
 
 // Update a specific task by ID for the authenticated user.
-async function update(req, res) {
+async function update(req, res, next) {
     if (!req.body) req.body = {};
 
     const { error, value } = patchTaskSchema.validate(req.body, {
@@ -120,39 +132,34 @@ async function update(req, res) {
     }
 
     try {
-        const result = await pool.query(
-            `UPDATE tasks
-             SET title = COALESCE($1, title),
-                 is_completed = COALESCE($2, is_completed)
-             WHERE id = $3 AND user_id = $4
-             RETURNING id, title, is_completed AS "isCompleted"`,
-            [
-                value.title ?? null,
-                value.isCompleted ?? null,
-                taskId,
-                global.user_id
-            ]
-        );
+        const task = await prisma.task.update({
+            where: {
+                id: taskId,
+                userId: global.user_id,
+            },
+            data: value,
+            select: {
+                id: true,
+                title: true,
+                isCompleted: true,
+            },
+        });
 
-        if (result.rows.length === 0) {
+        return res.status(200).json(task);
+
+    } catch (error) {
+        if (error.code === "P2025") {
             return res.status(404).json({
                 message: "Task not found",
             });
         }
 
-        return res.status(200).json(result.rows[0]);
-
-    } catch (error) {
-        console.error("Task update error:", error);
-
-        return res.status(500).json({
-            message: "Internal server error",
-        });
+        next(error);
     }
 }
 
 // Delete a specific task by ID for the authenticated user.
-async function deleteTask(req, res) {
+async function deleteTask(req, res, next) {
     const taskId = parseInt(req.params?.id);
 
     if (isNaN(taskId)) {
@@ -162,29 +169,29 @@ async function deleteTask(req, res) {
     }
 
     try {
-        const result = await pool.query(
-            `DELETE FROM tasks
-             WHERE id = $1 AND user_id = $2
-             RETURNING id, title, is_completed AS "isCompleted"`,
-            [taskId, global.user_id]
-        );
+        const task = await prisma.task.delete({
+            where: {
+                id: taskId,
+                userId: global.user_id,
+            },
+            select: {
+                id: true,
+                title: true,
+                isCompleted: true,
+            },
+        });
 
-        if (result.rows.length === 0) {
+        return res.status(200).json(task);
+
+    } catch (error) {
+        if (error.code === "P2025") {
             return res.status(404).json({
                 message: "Task not found",
             });
         }
 
-        return res.status(200).json(result.rows[0]);
-
-    } catch (error) {
-        console.error("Task deletion error:", error);
-
-        return res.status(500).json({
-            message: "Internal server error",
-        });
+        next(error);
     }
 }
-
 
 module.exports = { create, index, show, update, deleteTask };

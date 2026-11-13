@@ -25,3 +25,5 @@ package-lock.json
 # Generated files for Week 1 assignment
 # ===========================================
 assignment1/sample-files/*.txt
+
+/generated/prisma
