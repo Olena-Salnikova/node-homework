@@ -14,7 +14,7 @@ async function hashPassword(password) {
     return `${salt}:${derivedKey.toString("hex")}`;
 }
 
-// Register a new user with hashed password.
+// Compare the provided password with the stored hash.
 async function comparePassword(inputPassword, storedHash) {
     const [salt, key] = storedHash.split(":");
     const keyBuffer = Buffer.from(key, "hex");
@@ -23,7 +23,7 @@ async function comparePassword(inputPassword, storedHash) {
     return crypto.timingSafeEqual(keyBuffer, derivedKey);
 }
 
-// Handle user registration, login, and logout.
+// Register a new user and create three welcome tasks in a transaction.
 async function register(req, res, next) {
     if (!req.body) req.body = {};
 
@@ -41,24 +41,57 @@ async function register(req, res, next) {
     const hashedPassword = await hashPassword(password);
 
     try {
-        const user = await prisma.user.create({
-            data: {
-                name,
-                email: email.toLowerCase(),
-                hashedPassword,
-            },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-            },
+        const result = await prisma.$transaction(async (tx) => {
+            const user = await tx.user.create({
+                data: {
+                    name,
+                    email: email.toLowerCase(),
+                    hashedPassword,
+                },
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                },
+            });
+
+            await tx.task.createMany({
+                data: [
+                    {
+                        title: "Complete your profile",
+                        priority: "medium",
+                        userId: user.id,
+                    },
+                    {
+                        title: "Add your first task",
+                        priority: "high",
+                        userId: user.id,
+                    },
+                    {
+                        title: "Explore the app",
+                        priority: "low",
+                        userId: user.id,
+                    },
+                ],
+            });
+
+            const welcomeTasks = await tx.task.findMany({
+                where: {
+                    userId: user.id,
+                },
+            });
+
+            return { user, welcomeTasks };
         });
+
+        const { user, welcomeTasks } = result;
 
         global.user_id = user.id;
 
         return res.status(201).json({
-            name: user.name,
-            email: user.email,
+            user,
+            welcomeTasks,
+            transactionStatus: "success",
         });
 
     } catch (error) {
