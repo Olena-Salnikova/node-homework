@@ -15,30 +15,21 @@ async function create(req, res) {
         });
     }
 
-    try {
-        const task = await prisma.task.create({
-            data: {
-                title: value.title,
-                priority: value.priority,
-                userId: global.user_id,
-            },
-            select: {
-                id: true,
-                title: true,
-                isCompleted: true,
-                priority: true,
-            },
-        });
+    const task = await prisma.task.create({
+        data: {
+            title: value.title,
+            priority: value.priority,
+            userId: req.user.id,
+        },
+        select: {
+            id: true,
+            title: true,
+            isCompleted: true,
+            priority: true,
+        },
+    });
 
-        return res.status(201).json(task);
-
-    } catch (error) {
-        console.error("Task creation error:", error);
-
-        return res.status(500).json({
-            message: "Internal server error",
-        });
-    }
+    return res.status(201).json(task);
 }
 
 // Retrieve all tasks for the authenticated user.
@@ -57,7 +48,7 @@ async function index(req, res) {
         const skip = (page - 1) * limit;
 
         const where = {
-            userId: global.user_id,
+            userId: req.user.id,
         };
 
         if (req.query.find) {
@@ -142,7 +133,7 @@ async function show(req, res, next) {
         const task = await prisma.task.findUnique({
             where: {
                 id: taskId,
-                userId: global.user_id,
+                userId: req.user.id,
             },
             select: {
                 id: true,
@@ -197,7 +188,7 @@ async function update(req, res, next) {
         const task = await prisma.task.update({
             where: {
                 id: taskId,
-                userId: global.user_id,
+                userId: req.user.id,
             },
             data: value,
             select: {
@@ -235,12 +226,13 @@ async function deleteTask(req, res, next) {
         const task = await prisma.task.delete({
             where: {
                 id: taskId,
-                userId: global.user_id,
+                userId: req.user.id,
             },
             select: {
                 id: true,
                 title: true,
                 isCompleted: true,
+                priority: true,
             },
         });
 
@@ -284,7 +276,7 @@ async function bulkCreate(req, res) {
             title: value.title,
             isCompleted: value.isCompleted,
             priority: value.priority,
-            userId: global.user_id,
+            userId: req.user.id,
         });
     }
 
