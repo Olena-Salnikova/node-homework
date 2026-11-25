@@ -3,6 +3,26 @@ const prisma = require("../db/prisma");
 
 const crypto = require("crypto");
 const util = require("util");
+const { randomUUID } = require("crypto");
+const jwt = require("jsonwebtoken");
+
+// eslint-disable-next-line no-unused-vars
+const cookieFlags = (req) => {
+    return {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production", // only when HTTPS is available
+        sameSite: "Strict",
+    };
+};
+
+const setJwtCookie = (req, res, user) => {
+    // Sign JWT
+    const payload = { id: user.id, csrfToken: randomUUID() };
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" }); // 1 hour expiration
+    // Set cookie. Note that the cookie flags have to be different in production and in test.
+    res.cookie("jwt", token, { ...cookieFlags(req), maxAge: 3600000 }); // 1 hour expiration
+    return payload.csrfToken; // this is needed in the body returned by logon() or register()
+};
 
 const scrypt = util.promisify(crypto.scrypt);
 
@@ -86,9 +106,12 @@ async function register(req, res, next) {
 
         const { user, welcomeTasks } = result;
 
-        global.user_id = user.id;
+        const csrfToken = setJwtCookie(req, res, user);
 
         return res.status(201).json({
+            name: user.name,
+            email: user.email,
+            csrfToken,
             user,
             welcomeTasks,
             transactionStatus: "success",
@@ -112,6 +135,18 @@ async function register(req, res, next) {
 async function logon(req, res) {
     const { email, password } = req.body || {};
 
+    // Validate login credentials before querying the database.
+    if (
+        typeof email !== "string" ||
+        typeof password !== "string" ||
+        !email.trim() ||
+        !password.trim()
+    ) {
+        return res.status(400).json({
+            message: "Email and password are required",
+        });
+    }
+
     try {
         const normalizedEmail = email?.toLowerCase();
 
@@ -128,11 +163,12 @@ async function logon(req, res) {
             });
         }
 
-        global.user_id = user.id;
+        const csrfToken = setJwtCookie(req, res, user);
 
         return res.status(200).json({
             name: user.name,
             email: user.email,
+            csrfToken,
         });
 
     } catch (error) {
@@ -145,7 +181,7 @@ async function logon(req, res) {
 
 // Handle user logout.
 function logoff(req, res) {
-    global.user_id = null;
+    res.clearCookie("jwt", cookieFlags(req));
 
     return res.sendStatus(200);
 }
